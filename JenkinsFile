@@ -1,0 +1,32 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Clonar repositorio') {
+            steps {
+                echo 'Código clonado desde GitHub'
+            }
+        }
+
+        stage('Instalar dependencias') {
+            steps {
+                sh 'npm install'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm run build'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Build exitoso'
+        }
+        failure {
+            echo '❌ Build fallido'
+        }
+    }
+}
