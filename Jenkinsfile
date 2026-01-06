@@ -1,18 +1,16 @@
 pipeline {
   agent any
 
-  stages {
-    stage('Checkout') {
-      steps {
-        echo 'Clonando código'
-      }
-    }
+  tools {
+    nodejs 'Node_25'
+  }
 
+  stages {
     stage('Build') {
       steps {
-        sh 'node -v'
-        sh 'npm -v'
-        sh 'npm run build'
+        bat 'node -v'
+        bat 'npm -v'
+        bat 'npm run build'
       }
     }
   }
