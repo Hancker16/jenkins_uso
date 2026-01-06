@@ -1,8 +1,5 @@
 pipeline {
   agent any
-  tools {
-    nodejs "Node_25"
-  }
 
   stages {
     stage('Checkout') {
@@ -13,6 +10,8 @@ pipeline {
 
     stage('Build') {
       steps {
+        sh 'node -v'
+        sh 'npm -v'
         sh 'npm run build'
       }
     }
