@@ -135,7 +135,7 @@ pipeline {
     stage('Deploy docker') {
       steps{
           sh '''
-            IMAGE = $(cat .image_name)
+            IMAGE=$(cat .image_name)
             CONTAINER_NAME = "uso_jenkins_app"
 
             echo "Deploy => image=${Image}
