@@ -1,22 +1,21 @@
 pipeline {
-  agent {
-    docker { image 'node:20-alpine' }
+  agent any
+
+  options {
+    skipDefaultCheckout(true)
   }
 
   stages {
-    stage('Checkout') {
-      steps { checkout scm }
-    }
-
-    stage('Install') {
+    stage('Checkout (manual)') {
       steps {
-        sh 'npm install'
+        deleteDir()        // limpia el workspace
+        checkout scm       // clona el repo correctamente
       }
     }
 
-    stage('Build') {
+    stage('Prueba') {
       steps {
-        sh 'npm run build'
+        echo 'Checkout manual OK'
       }
     }
   }
