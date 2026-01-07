@@ -1,2 +1,3 @@
-let user = null;
-console.log(user.name);
+const userInput ="console.log('hack')";
+eval(userInput);
+console.log("Prueba de jenkins");
