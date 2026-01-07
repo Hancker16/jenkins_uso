@@ -4,7 +4,7 @@ pipeline {
   options {
     skipDefaultCheckout(true)
   }
-
+stages {
 stage('Node: Checkout + Install + Build + Sonar') {
   agent {
     docker { image 'node:20-bookworm' }
@@ -34,5 +34,7 @@ stage('Node: Checkout + Install + Build + Sonar') {
     """
   }
 }
+}
+
 
 }
