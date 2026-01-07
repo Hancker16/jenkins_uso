@@ -144,6 +144,7 @@ pipeline {
             docker rm "$CONTAINER_NAME" 2>/dev/null || true
 
             docker run -d --name "$CONTAINER_NAME" -p 3000:3000 "$IMAGE"
+            docker ps --filter "name=$CONTAINER_NAME"S
             echo "Deploy completado en http:localhost:3000"
           '''
       }
