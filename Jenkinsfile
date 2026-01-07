@@ -28,13 +28,16 @@ pipeline {
     stage('Build (npm)') {
       steps {
         sh '''
+          JENKINS_CID="$(hostname)"
           docker run --rm \
-            -v "$PWD":/repo -w /repo \
+            --volumes-from "$JENKINS_CID" \
+            -w /var/jenkins_home/jobs/ci-cd-demo/workspace \
             node:20-bookworm \
-            bash -lc "cd '${APP_DIR}' && ls -la && npm install && npm run build"
+            bash -lc "ls -la && npm install && npm run build"
         '''
       }
     }
+
 
     stage('SonarQube') {
       environment {
