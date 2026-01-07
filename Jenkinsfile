@@ -8,14 +8,20 @@ pipeline {
   stages {
     stage('Checkout (manual)') {
       steps {
-        deleteDir()        // limpia el workspace
-        checkout scm       // clona el repo correctamente
+        deleteDir()
+        checkout scm
       }
     }
 
-    stage('Prueba') {
+    stage('Install + Build (Node)') {
+      agent {
+        docker { image 'node:20-alpine' }
+      }
       steps {
-        echo 'Checkout manual OK'
+        sh 'node -v'
+        sh 'npm -v'
+        sh 'npm install'
+        sh 'npm run build'
       }
     }
   }
