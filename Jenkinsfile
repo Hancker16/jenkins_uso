@@ -2,41 +2,54 @@ pipeline {
   agent any
 
   options {
+    // Evita el checkout automático que te estaba rompiendo el workspace
     skipDefaultCheckout(true)
   }
-stages {
-stage('Node: Checkout + Install + Build + Sonar') {
-  agent {
-    docker {
-      image 'node:20-bookworm'
-      args '--network ci'
-    }
+
   environment {
-    SONAR_TOKEN = credentials('sonar-token')
+    APP_NAME = "uso_jenkins"
+    SONAR_HOST = "http://sonarqube:9000"
+    SONAR_PROJECT_KEY = "uso_jenkins"
   }
-  steps {
-    deleteDir()
-    checkout scm
 
-    sh 'npm install'
-    sh 'npm run build'
+  stages {
+    stage('Node: Checkout + Install + Build + Sonar') {
+      agent {
+        docker {
+          image 'node:20-bookworm'
+          // Importante: une el contenedor temporal a la misma red docker del compose
+          args '--network ci'
+        }
+      }
 
-    // Java para sonar-scanner
-    sh 'apt-get update && apt-get install -y openjdk-17-jre'
-    sh 'java -version'
+      environment {
+        SONAR_TOKEN = credentials('sonar-token')
+      }
 
-    sh 'npx --yes sonar-scanner -v'
+      steps {
+        // Checkout dentro del mismo contexto (workspace) donde corre npm/sonar
+        deleteDir()
+        checkout scm
 
-    sh """
-      npx --yes sonar-scanner \
-        -Dsonar.projectKey=uso_jenkins \
-        -Dsonar.sources=. \
-        -Dsonar.host.url=http://sonarqube:9000 \
-        -Dsonar.login=$SONAR_TOKEN
-    """
+        // Build
+        sh 'node -v'
+        sh 'npm -v'
+        sh 'npm install'
+        sh 'npm run build'
+
+        // Sonar Scanner necesita Java
+        sh 'apt-get update && apt-get install -y openjdk-17-jre'
+        sh 'java -version'
+
+        // Ejecutar análisis en SonarQube
+        sh """
+          npx --yes sonar-scanner \
+            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=${SONAR_HOST} \
+            -Dsonar.login=${SONAR_TOKEN}
+        """
+      }
+    }
   }
-}
-}
-
-
 }
