@@ -45,12 +45,13 @@ pipeline {
       }
       steps {
         sh '''
+          JENKINS_CID="$(hostname)"
           docker run --rm \
             --network laboratio-ci_ci \
-            -v "$PWD":/repo -w /repo \
+            --volumes-from "$JENKINS_CID" \
+            -w /var/jenkins_home/jobs/ci-cd-demo/workspace \
             node:20-bookworm \
-            bash -lc "cd '${APP_DIR}' && \
-                      apt-get update && apt-get install -y openjdk-17-jre >/dev/null && \
+            bash -lc "apt-get update && apt-get install -y openjdk-17-jre >/dev/null && \
                       npx --yes sonar-scanner \
                         -Dsonar.projectKey=uso_jenkins \
                         -Dsonar.sources=. \
@@ -59,6 +60,7 @@ pipeline {
         '''
       }
     }
+
 
     stage('Docker Build Image') {
       steps {
