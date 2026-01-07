@@ -2,18 +2,16 @@ pipeline {
   agent any
 
   options {
-    // Evita el checkout automático que te daba "fatal: not in a git directory"
     skipDefaultCheckout(true)
   }
 
   environment {
-    APP_NAME  = "uso_jenkins"
+    APP_NAME   = "uso_jenkins"
+    APP_DIR    = "."               // <-- si tu package.json está en una subcarpeta, ponla aquí (ej: "app" o "uso_jenkins")
     DOCKER_NET = "laboratio-ci_ci"
 
-    // Nexus Docker Registry (puede requerir ajuste a host.docker.internal:8082 si localhost no responde desde Jenkins)
     REGISTRY = "localhost:8082"
-
-    IMAGE = "${REGISTRY}/${APP_NAME}:${BUILD_NUMBER}"
+    IMAGE    = "${REGISTRY}/${APP_NAME}:${BUILD_NUMBER}"
   }
 
   stages {
@@ -21,6 +19,9 @@ pipeline {
       steps {
         deleteDir()
         checkout scm
+        sh 'pwd'
+        sh 'ls -la'
+        sh 'ls -la "${APP_DIR}"'
       }
     }
 
@@ -28,9 +29,9 @@ pipeline {
       steps {
         sh '''
           docker run --rm \
-            -v "$PWD":/app -w /app \
+            -v "$PWD":/repo -w /repo \
             node:20-bookworm \
-            bash -lc "npm install && npm run build"
+            bash -lc "cd '${APP_DIR}' && ls -la && npm install && npm run build"
         '''
       }
     }
@@ -43,9 +44,10 @@ pipeline {
         sh '''
           docker run --rm \
             --network laboratio-ci_ci \
-            -v "$PWD":/app -w /app \
+            -v "$PWD":/repo -w /repo \
             node:20-bookworm \
-            bash -lc "apt-get update && apt-get install -y openjdk-17-jre >/dev/null && \
+            bash -lc "cd '${APP_DIR}' && \
+                      apt-get update && apt-get install -y openjdk-17-jre >/dev/null && \
                       npx --yes sonar-scanner \
                         -Dsonar.projectKey=uso_jenkins \
                         -Dsonar.sources=. \
@@ -57,7 +59,9 @@ pipeline {
 
     stage('Docker Build Image') {
       steps {
-        sh 'docker build -t "$IMAGE" .'
+        sh '''
+          docker build -t "$IMAGE" "${APP_DIR}"
+        '''
       }
     }
 
