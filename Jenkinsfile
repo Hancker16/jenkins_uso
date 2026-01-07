@@ -61,7 +61,7 @@ pipeline {
       }
     }
 
-    stage('Quality Gate Result (no bloquea)') {
+    stage('Quality Gate Result') {
       environment {
         SONAR_TOKEN = credentials('sonar-token')
       }
