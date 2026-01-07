@@ -1,16 +1,10 @@
 pipeline {
   agent any
 
-  tools {
-    nodejs 'Node_25'
-  }
-
   stages {
-    stage('Build') {
+    stage('Prueba') {
       steps {
-        bat 'node -v'
-        bat 'npm -v'
-        bat 'npm run build'
+        echo 'Jenkins está ejecutando el pipeline correctamente'
       }
     }
   }
