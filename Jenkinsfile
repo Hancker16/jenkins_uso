@@ -18,7 +18,7 @@ pipeline {
         docker {
           image 'node:20-bookworm'
           // Importante: une el contenedor temporal a la misma red docker del compose
-          args '--network ci'
+          args '--network laboratio-ci_ci'
         }
       }
 
