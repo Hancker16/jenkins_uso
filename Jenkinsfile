@@ -2,9 +2,19 @@ pipeline {
   agent any
 
   stages {
-    stage('Prueba') {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Install') {
       steps {
-        echo 'Jenkins está ejecutando el pipeline correctamente'
+        sh 'npm install'
+      }
+    }
+
+    stage('Build') {
+      steps {
+        sh 'npm run build'
       }
     }
   }
