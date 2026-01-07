@@ -10,9 +10,11 @@ pipeline {
     APP_DIR    = "."
     DOCKER_NET = "laboratio-ci_ci"
 
-    // ✅ Cambiado: desde Jenkins (contenedor) el host es host.docker.internal
+    // Tu registry en Nexus (desde Jenkins en Docker Desktop)
     REGISTRY = "host.docker.internal:8082"
-    IMAGE    = "${REGISTRY}/${APP_NAME}:${BUILD_NUMBER}"
+
+    // Tag base
+    BASE_TAG = "${BUILD_NUMBER}"
   }
 
   stages {
@@ -20,9 +22,7 @@ pipeline {
       steps {
         deleteDir()
         checkout scm
-        sh 'pwd'
         sh 'ls -la'
-        sh 'ls -la "${APP_DIR}"'
       }
     }
 
@@ -34,12 +34,12 @@ pipeline {
             --volumes-from "$JENKINS_CID" \
             -w /var/jenkins_home/jobs/ci-cd-demo/workspace \
             node:20-bookworm \
-            bash -lc "ls -la && npm install && npm run build"
+            bash -lc "npm install && npm run build"
         '''
       }
     }
 
-    stage('SonarQube') {
+    stage('SonarQube Scan') {
       environment {
         SONAR_TOKEN = credentials('sonar-token')
       }
@@ -61,10 +61,60 @@ pipeline {
       }
     }
 
+    stage('Quality Gate Result (no bloquea)') {
+      environment {
+        SONAR_TOKEN = credentials('sonar-token')
+      }
+      steps {
+        sh '''
+          set +e
+
+          # Lee el task url del scanner
+          REPORT=".scannerwork/report-task.txt"
+          CE_TASK_URL=$(grep -E '^ceTaskUrl=' "$REPORT" | cut -d= -f2-)
+
+          # Espera a que Sonar termine el procesamiento
+          ANALYSIS_ID=""
+          for i in $(seq 1 90); do
+            JSON=$(curl -s -u "$SONAR_TOKEN:" "$CE_TASK_URL")
+            STATUS=$(echo "$JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
+
+            if [ "$STATUS" = "SUCCESS" ]; then
+              ANALYSIS_ID=$(echo "$JSON" | sed -n 's/.*"analysisId":"\\([^"]*\\)".*/\\1/p' | head -n1)
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$ANALYSIS_ID" ]; then
+            echo "qg-f" > .qg_tag
+            echo "No se pudo obtener analysisId => marcando como qg-f"
+            exit 0
+          fi
+
+          # Consulta el QG
+          QG_JSON=$(curl -s -u "$SONAR_TOKEN:" "http://sonarqube:9000/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+          QG_STATUS=$(echo "$QG_JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
+
+          echo "Quality Gate status: $QG_STATUS"
+
+          if [ "$QG_STATUS" = "OK" ]; then
+            echo "qg-p" > .qg_tag
+          else
+            echo "qg-f" > .qg_tag
+          fi
+        '''
+      }
+    }
+
     stage('Docker Build Image') {
       steps {
         sh '''
+          QG_TAG=$(cat .qg_tag)
+          IMAGE="${REGISTRY}/${APP_NAME}:${BASE_TAG}-${QG_TAG}"
+          echo "Building image: $IMAGE"
           docker build -t "$IMAGE" "${APP_DIR}"
+          echo "$IMAGE" > .image_name
         '''
       }
     }
@@ -73,8 +123,10 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
           sh '''
+            IMAGE=$(cat .image_name)
             echo "$NEXUS_PASS" | docker login "$REGISTRY" -u "$NEXUS_USER" --password-stdin
             docker push "$IMAGE"
+            echo "Pushed: $IMAGE"
           '''
         }
       }
