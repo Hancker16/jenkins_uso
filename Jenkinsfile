@@ -2,53 +2,70 @@ pipeline {
   agent any
 
   options {
-    // Evita el checkout automático que te estaba rompiendo el workspace
     skipDefaultCheckout(true)
   }
 
   environment {
     APP_NAME = "uso_jenkins"
-    SONAR_HOST = "http://sonarqube:9000"
-    SONAR_PROJECT_KEY = "uso_jenkins"
+    REGISTRY = "localhost:8082"  // Jenkins container publica hacia el host normalmente OK
+    IMAGE = "${REGISTRY}/${APP_NAME}:${BUILD_NUMBER}"
   }
 
   stages {
-    stage('Node: Checkout + Install + Build + Sonar') {
-      agent {
-        docker {
-          image 'node:20-bookworm'
-          // Importante: une el contenedor temporal a la misma red docker del compose
-          args '--network laboratio-ci_ci'
-        }
+    stage('Checkout') {
+      steps {
+        deleteDir()
+        checkout scm
       }
+    }
 
+    stage('Build (npm)') {
+      steps {
+        // Ejecuta el build usando node en contenedor para tener npm disponible
+        sh """
+          docker run --rm \
+            --network ${env.DOCKER_NET ?: ""} \
+            -v "\$PWD":/app -w /app \
+            node:20-bookworm \
+            bash -lc "npm install && npm run build"
+        """
+      }
+    }
+
+    stage('SonarQube') {
       environment {
         SONAR_TOKEN = credentials('sonar-token')
       }
-
       steps {
-        // Checkout dentro del mismo contexto (workspace) donde corre npm/sonar
-        deleteDir()
-        checkout scm
-
-        // Build
-        sh 'node -v'
-        sh 'npm -v'
-        sh 'npm install'
-        sh 'npm run build'
-
-        // Sonar Scanner necesita Java
-        sh 'apt-get update && apt-get install -y openjdk-17-jre'
-        sh 'java -version'
-
-        // Ejecutar análisis en SonarQube
         sh """
-          npx --yes sonar-scanner \
-            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-            -Dsonar.sources=. \
-            -Dsonar.host.url=${SONAR_HOST} \
-            -Dsonar.login=${SONAR_TOKEN}
+          docker run --rm \
+            --network ${env.DOCKER_NET ?: ""} \
+            -v "\$PWD":/app -w /app \
+            node:20-bookworm \
+            bash -lc "apt-get update && apt-get install -y openjdk-17-jre >/dev/null && \
+                      npx --yes sonar-scanner \
+                        -Dsonar.projectKey=${APP_NAME} \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=http://sonarqube:9000 \
+                        -Dsonar.login=$SONAR_TOKEN"
         """
+      }
+    }
+
+    stage('Docker Build Image') {
+      steps {
+        sh "docker build -t ${IMAGE} ."
+      }
+    }
+
+    stage('Push to Nexus') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+          sh """
+            echo "$NEXUS_PASS" | docker login ${REGISTRY} -u "$NEXUS_USER" --password-stdin
+            docker push ${IMAGE}
+          """
+        }
       }
     }
   }
