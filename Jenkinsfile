@@ -138,7 +138,7 @@ pipeline {
             IMAGE=$(cat .image_name)
             CONTAINER_NAME="uso_jenkins_app"
 
-            echo "Deploy => image=${Image}
+            echo "Deploy => image=${Image}"
 
             docker stop "$CONTAINER_NAME" 2>/dev/null || true
             docker rm "$CONTAINER_NAME" 2>/dev/null || true
