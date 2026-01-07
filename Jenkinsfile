@@ -18,10 +18,14 @@ pipeline {
         docker { image 'node:20-alpine' }
       }
       steps {
-        sh 'node -v'
-        sh 'npm -v'
-        sh 'npm install'
-        sh 'npm run build'
+        // Fuerza a usar el workspace principal donde sí está el repo
+        dir("${env.WORKSPACE}") {
+          sh 'ls -la'
+          sh 'node -v'
+          sh 'npm -v'
+          sh 'npm install'
+          sh 'npm run build'
+        }
       }
     }
   }
