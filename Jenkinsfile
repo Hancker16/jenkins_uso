@@ -7,10 +7,11 @@ pipeline {
 
   environment {
     APP_NAME   = "uso_jenkins"
-    APP_DIR    = "."               // <-- si tu package.json está en una subcarpeta, ponla aquí (ej: "app" o "uso_jenkins")
+    APP_DIR    = "."
     DOCKER_NET = "laboratio-ci_ci"
 
-    REGISTRY = "localhost:8082"
+    // ✅ Cambiado: desde Jenkins (contenedor) el host es host.docker.internal
+    REGISTRY = "host.docker.internal:8082"
     IMAGE    = "${REGISTRY}/${APP_NAME}:${BUILD_NUMBER}"
   }
 
@@ -38,7 +39,6 @@ pipeline {
       }
     }
 
-
     stage('SonarQube') {
       environment {
         SONAR_TOKEN = credentials('sonar-token')
@@ -60,7 +60,6 @@ pipeline {
         '''
       }
     }
-
 
     stage('Docker Build Image') {
       steps {
