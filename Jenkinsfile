@@ -24,7 +24,7 @@ pipeline {
     BASE_IMAGE_REPO = "library/node"
 
     // Imagen deseada del proyecto (variable por tag)
-    DESIRED_PROJECT_IMAGE = "${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${params.BASE_IMAGE_TAG}"
+    //DESIRED_PROJECT_IMAGE = "${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${params.BASE_IMAGE_TAG}"
 
     // Nexus para SUBIR tu imagen final (tu app)
     PUSH_REGISTRY = "host.docker.internal:8082"
@@ -55,7 +55,8 @@ pipeline {
             : > .ci_project_image
             echo "unset" > .ci_image_source
 
-            IMG="${DESIRED_PROJECT_IMAGE}"
+            IMG="${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${BASE_IMAGE_TAG}"
+            echo "BASE_IMAGE_TAG=$BASE_IMAGE_TAG"
             echo "Desired base image: $IMG"
 
             # Step 1: si existe localmente, úsala
