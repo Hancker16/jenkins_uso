@@ -9,7 +9,7 @@ pipeline {
   parameters {
     string(
       name: 'BASE_IMAGE_TAG',
-      defaultValue: '20-alpine',
+      defaultValue: '20-bookworm',
       description: 'Tag de la imagen base (ej: 20-bookworm, 20-alpine, 22-bookworm)'
     )
   }
@@ -82,9 +82,15 @@ pipeline {
               exit 0
             fi
 
-            # 3) Internet
-            warn "Nexus no tiene la imagen. Descargando desde Internet (Docker Hub)..."
-            docker pull "$INTERNET_IMG" >/dev/null 2>&1
+            # 3) Internet (con validación)
+            warn "Nexus no tiene la imagen. Intentando descargar desde Internet (Docker Hub)..."
+
+            if ! docker pull "$INTERNET_IMG" >/dev/null 2>&1; then
+              err "No se encontró la imagen en Internet (Docker Hub): $INTERNET_IMG"
+              err "Abortando pipeline."
+              exit 1
+            fi
+
             docker tag "$INTERNET_IMG" "$NEXUS_IMG"
 
             echo "$NEXUS_IMG" > .ci_project_image
