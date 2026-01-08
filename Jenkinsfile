@@ -5,19 +5,27 @@ pipeline {
     skipDefaultCheckout(true)
   }
 
+  // Tag variable para la imagen base (puedes cambiarlo en cada build)
+  parameters {
+    string(name: 'BASE_IMAGE_TAG', defaultValue: '20-bookworm', description: 'Tag de la imagen base (ej: 20-bookworm, 20-alpine, 22-bookworm)')
+  }
+
   environment {
     APP_NAME   = "uso_jenkins"
     APP_DIR    = "."
     DOCKER_NET = "laboratio-ci_ci"
 
-    // Nexus para BAJAR base images (Node). (Jenkins corre en contenedor)
-    PULL_REGISTRY = "host.docker.internal:8084"
-    NODE_IMAGE    = "${PULL_REGISTRY}/library/node:20-bookworm"
+    // Nexus para BAJAR base images (Node). Jenkins corre en contenedor
+    PULL_REGISTRY   = "host.docker.internal:8084"
+    BASE_IMAGE_REPO = "library/node"
+
+    // Imagen deseada del proyecto (variable por tag)
+    DESIRED_PROJECT_IMAGE = "${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${params.BASE_IMAGE_TAG}"
 
     // Nexus para SUBIR tu imagen final
     PUSH_REGISTRY = "host.docker.internal:8082"
 
-    // Tag base
+    // Tag base para tu imagen final
     BASE_TAG = "${BUILD_NUMBER}"
   }
 
@@ -31,15 +39,47 @@ pipeline {
       }
     }
 
-    stage('Login Nexus (pull base images)') {
+    stage('Resolve Project Image (local or nexus)') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
           sh '''
             set -e
+
+            # Inicializar "variables" persistidas en workspace
+            : > .ci_project_image
+            echo "unset" > .ci_image_source
+
+            IMG="${DESIRED_PROJECT_IMAGE}"
+            echo "Desired base image: $IMG"
+
+            # Step 1: si está local, úsala
+            if docker image inspect "$IMG" >/dev/null 2>&1; then
+              echo "$IMG" > .ci_project_image
+              echo "local" > .ci_image_source
+              echo "[resolver] Found locally => $IMG"
+              exit 0
+            fi
+
+            # Step 2: si no está local, bajar de Nexus
+            echo "[resolver] Not found locally. Pulling from Nexus..."
             echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin
-            docker pull "$NODE_IMAGE"
+            docker pull "$IMG"
+
+            echo "$IMG" > .ci_project_image
+            echo "nexus" > .ci_image_source
+            echo "[resolver] Pulled from Nexus => $IMG"
           '''
         }
+      }
+    }
+
+    stage('Report Image Source') {
+      steps {
+        sh '''
+          set -e
+          echo "PROJECT_IMAGE=$(cat .ci_project_image)"
+          echo "IMAGE_SOURCE=$(cat .ci_image_source)"
+        '''
       }
     }
 
@@ -47,11 +87,13 @@ pipeline {
       steps {
         sh '''
           set -e
+          PROJECT_IMAGE="$(cat .ci_project_image)"
           JENKINS_CID="$(hostname)"
+
           docker run --rm \
             --volumes-from "$JENKINS_CID" \
             -w /var/jenkins_home/jobs/ci-cd-demo/workspace \
-            "$NODE_IMAGE" \
+            "$PROJECT_IMAGE" \
             bash -lc "npm install && npm run build"
         '''
       }
@@ -64,12 +106,14 @@ pipeline {
       steps {
         sh '''
           set -e
+          PROJECT_IMAGE="$(cat .ci_project_image)"
           JENKINS_CID="$(hostname)"
+
           docker run --rm \
             --network "$DOCKER_NET" \
             --volumes-from "$JENKINS_CID" \
             -w /var/jenkins_home/jobs/ci-cd-demo/workspace \
-            "$NODE_IMAGE" \
+            "$PROJECT_IMAGE" \
             bash -lc "apt-get update && apt-get install -y openjdk-17-jre >/dev/null && \
                       npx --yes sonar-scanner \
                         -Dsonar.projectKey=uso_jenkins \
