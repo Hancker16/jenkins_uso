@@ -29,8 +29,7 @@ pipeline {
 
     stage('Build (npm)') {
       steps {
-        sh ''
-        '
+        sh '''
         JENKINS_CID = "$(hostname)"
         docker run--rm\
         --volumes - from "$JENKINS_CID"\ -
@@ -38,8 +37,7 @@ pipeline {
           var / jenkins_home / jobs / ci - cd - demo / workspace\
         node: 20 - bookworm\
         bash - lc "npm install && npm run build"
-        ''
-        '
+        '''
       }
     }
 
@@ -48,8 +46,7 @@ pipeline {
         SONAR_TOKEN = credentials('sonar-token')
       }
       steps {
-        sh ''
-        '
+        sh '''
         JENKINS_CID = "$(hostname)"
         docker run--rm\
         --network laboratio - ci_ci\
@@ -63,8 +60,7 @@ pipeline {
                         -Dsonar.sources=. \
                         -Dsonar.host.url=http://sonarqube:9000 \
                         -Dsonar.login=$SONAR_TOKEN"
-        ''
-        '
+        '''
       }
     }
 
@@ -73,8 +69,7 @@ pipeline {
         SONAR_TOKEN = credentials('sonar-token')
       }
       steps {
-        sh ''
-        '
+        sh '''
         set - e
 
         REPORT = ".scannerwork/report-task.txt"
@@ -148,44 +143,38 @@ pipeline {
         else
           echo "qg-f" > .qg_tag
         fi
-          ''
-        '
+          '''
       }
     }
 
     stage('Docker Build Image') {
       steps {
-        sh ''
-        '
+        sh '''
         QG_TAG = $(cat.qg_tag)
         IMAGE = "${REGISTRY}/${APP_NAME}:${BASE_TAG}-${QG_TAG}"
         echo "Building image: $IMAGE"
         docker build - t "$IMAGE"
         "${APP_DIR}"
-        echo "$IMAGE" > .image_name ''
-        '
+        echo "$IMAGE" > .image_name '''
       }
     }
 
     stage('Push to Nexus') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-          sh ''
-          '
+          sh '''
           IMAGE = $(cat.image_name)
           echo "$NEXUS_PASS" | docker login "$REGISTRY" - u "$NEXUS_USER"--password - stdin
           docker push "$IMAGE"
           echo "Pushed: $IMAGE"
-          ''
-          '
+          '''
         }
       }
     }
 
     stage('Deploy docker') {
       steps {
-        sh ''
-        '
+        sh '''
         IMAGE = $(cat.image_name)
         CONTAINER_NAME = "uso_jenkins_app"
 
@@ -200,8 +189,7 @@ pipeline {
         docker ps--filter "name=$CONTAINER_NAME"
         S
         echo "Deploy completado en http:localhost:3000"
-        ''
-        '
+        '''
       }
     }
   }
