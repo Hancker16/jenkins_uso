@@ -7,7 +7,11 @@ pipeline {
 
   // Tag variable para la imagen base (puedes cambiarlo en cada build)
   parameters {
-    string(name: 'BASE_IMAGE_TAG', defaultValue: '20-bookworm', description: 'Tag de la imagen base (ej: 20-bookworm, 20-alpine, 22-bookworm)')
+    string(
+      name: 'BASE_IMAGE_TAG',
+      defaultValue: '20-bookworm',
+      description: 'Tag de la imagen base (ej: 20-bookworm, 20-alpine, 22-bookworm)'
+    )
   }
 
   environment {
@@ -15,14 +19,14 @@ pipeline {
     APP_DIR    = "."
     DOCKER_NET = "laboratio-ci_ci"
 
-    // Nexus para BAJAR base images (Node). Jenkins corre en contenedor
+    // Nexus para BAJAR/ALMACENAR base images (Node)
     PULL_REGISTRY   = "host.docker.internal:8084"
     BASE_IMAGE_REPO = "library/node"
 
     // Imagen deseada del proyecto (variable por tag)
     DESIRED_PROJECT_IMAGE = "${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${params.BASE_IMAGE_TAG}"
 
-    // Nexus para SUBIR tu imagen final
+    // Nexus para SUBIR tu imagen final (tu app)
     PUSH_REGISTRY = "host.docker.internal:8082"
 
     // Tag base para tu imagen final
@@ -39,20 +43,22 @@ pipeline {
       }
     }
 
+    // Resolver imagen base:
+    // - Si está en local => IMAGE_SOURCE=local
+    // - Si no está en local => pull de Nexus => IMAGE_SOURCE=nexus
     stage('Resolve Project Image (local or nexus)') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
           sh '''
             set -e
 
-            # Inicializar "variables" persistidas en workspace
             : > .ci_project_image
             echo "unset" > .ci_image_source
 
             IMG="${DESIRED_PROJECT_IMAGE}"
             echo "Desired base image: $IMG"
 
-            # Step 1: si está local, úsala
+            # Step 1: si existe localmente, úsala
             if docker image inspect "$IMG" >/dev/null 2>&1; then
               echo "$IMG" > .ci_project_image
               echo "local" > .ci_image_source
@@ -60,7 +66,7 @@ pipeline {
               exit 0
             fi
 
-            # Step 2: si no está local, bajar de Nexus
+            # Step 2: si no existe localmente, baja de Nexus
             echo "[resolver] Not found locally. Pulling from Nexus..."
             echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin
             docker pull "$IMG"
@@ -147,7 +153,6 @@ pipeline {
 
           ANALYSIS_ID=""
 
-          # esperar el procesamiento EXACTO de ese ceTaskUrl
           for i in $(seq 1 120); do
             JSON=$(curl -s -u "$SONAR_TOKEN:" "$CE_TASK_URL")
             STATUS=$(echo "$JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
@@ -174,7 +179,6 @@ pipeline {
 
           echo "analysisId=$ANALYSIS_ID"
 
-          # consultar el QG del MISMO analysisId
           QG_JSON=$(curl -s -u "$SONAR_TOKEN:" "http://sonarqube:9000/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
           QG_STATUS=$(echo "$QG_JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
 
@@ -203,7 +207,7 @@ pipeline {
       }
     }
 
-    stage('Push to Nexus') {
+    stage('Push to Nexus (app image)') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
           sh '''
@@ -235,5 +239,56 @@ pipeline {
         '''
       }
     }
+
+    // ✅ NUEVO: Si la imagen se tomó de LOCAL, verifica si existe en Nexus.
+    // Si NO existe, la sube. Si existe, no hace nada.
+    // Si la imagen se tomó de NEXUS, NO hace nada.
+    stage('Publish Base Image to Nexus (only if local & missing)') {
+      when {
+        expression {
+          return fileExists('.ci_image_source') && readFile('.ci_image_source').trim() == 'local'
+        }
+      }
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+          sh '''
+            set -e
+
+            PROJECT_IMAGE="$(cat .ci_project_image)"
+            echo "[base-publish] IMAGE_SOURCE=local => checking in Nexus..."
+            echo "[base-publish] PROJECT_IMAGE=$PROJECT_IMAGE"
+
+            # Construir URL del manifest en Nexus: /v2/<repo>/manifests/<tag>
+            REPO_PATH="${BASE_IMAGE_REPO}"
+            TAG="${BASE_IMAGE_TAG}"
+            MANIFEST_URL="http://${PULL_REGISTRY}/v2/${REPO_PATH}/manifests/${TAG}"
+
+            echo "[base-publish] Checking: $MANIFEST_URL"
+
+            CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -u "${NEXUS_USER}:${NEXUS_PASS}" \
+              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              "$MANIFEST_URL" || true)
+
+            if [ "$CODE" = "200" ]; then
+              echo "[base-publish] Base image already exists in Nexus (HTTP 200). Doing nothing."
+              exit 0
+            fi
+
+            if [ "$CODE" = "404" ]; then
+              echo "[base-publish] Base image NOT found in Nexus (HTTP 404). Pushing now..."
+              echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin
+              docker push "$PROJECT_IMAGE"
+              echo "[base-publish] Pushed base image => $PROJECT_IMAGE"
+              exit 0
+            fi
+
+            echo "[base-publish] Unexpected HTTP code from Nexus: $CODE"
+            echo "[base-publish] For safety, not pushing."
+          '''
+        }
+      }
+    }
+
   }
 }
