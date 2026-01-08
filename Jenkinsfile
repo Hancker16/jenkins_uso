@@ -9,7 +9,7 @@ pipeline {
   parameters {
     string(
       name: 'BASE_IMAGE_TAG',
-      defaultValue: '20-prueba-hander',
+      defaultValue: '20-alpine',
       description: 'Tag de la imagen base (ej: 20-bookworm, 20-alpine, 22-bookworm)'
     )
   }
@@ -23,8 +23,9 @@ pipeline {
     PULL_REGISTRY   = "host.docker.internal:8084"
     BASE_IMAGE_REPO = "library/node"
 
-    // Imagen deseada del proyecto (variable por tag)
-    //DESIRED_PROJECT_IMAGE = "${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${params.BASE_IMAGE_TAG}"
+    // Internet/DockerHub base (misma repo, distinto registry)
+    INTERNET_REGISTRY = "docker.io"
+    INTERNET_IMAGE    = "node"
 
     // Nexus para SUBIR tu imagen final (tu app)
     PUSH_REGISTRY = "host.docker.internal:8082"
@@ -45,8 +46,10 @@ pipeline {
 
     // Resolver imagen base:
     // - Si está en local => IMAGE_SOURCE=local
-    // - Si no está en local => pull de Nexus => IMAGE_SOURCE=nexus
-    stage('Resolve Project Image (local or nexus)') {
+    // - Si no está en local:
+    //    - intenta Nexus (pull)
+    //    - si no existe en Nexus => baja de internet (docker hub) y la retaggea a Nexus => IMAGE_SOURCE=internet
+    stage('Resolve Project Image (local / nexus / internet)') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
           sh '''
@@ -55,26 +58,45 @@ pipeline {
             : > .ci_project_image
             echo "unset" > .ci_image_source
 
-            IMG="${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${BASE_IMAGE_TAG}"
-            echo "BASE_IMAGE_TAG=$BASE_IMAGE_TAG"
-            echo "Desired base image: $IMG"
+            # Imagen destino (la que SIEMPRE usará el pipeline)
+            NEXUS_IMG="${PULL_REGISTRY}/${BASE_IMAGE_REPO}:${BASE_IMAGE_TAG}"
 
-            # Step 1: si existe localmente, úsala
-            if docker image inspect "$IMG" >/dev/null 2>&1; then
-              echo "$IMG" > .ci_project_image
+            # Imagen origen internet (docker hub)
+            INTERNET_IMG="${INTERNET_IMAGE}:${BASE_IMAGE_TAG}"
+
+            echo "BASE_IMAGE_TAG=$BASE_IMAGE_TAG"
+            echo "Desired (Nexus tag): $NEXUS_IMG"
+            echo "Internet source:     $INTERNET_IMG"
+
+            # Step 1: si existe localmente el tag de Nexus, úsalo
+            if docker image inspect "$NEXUS_IMG" >/dev/null 2>&1; then
+              echo "$NEXUS_IMG" > .ci_project_image
               echo "local" > .ci_image_source
-              echo "[resolver] Found locally => $IMG"
+              echo "[resolver] Found locally => $NEXUS_IMG"
               exit 0
             fi
 
-            # Step 2: si no existe localmente, baja de Nexus
-            echo "[resolver] Not found locally. Pulling from Nexus..."
+            # Step 2: intentar bajar desde Nexus
+            echo "[resolver] Not found locally. Trying Nexus pull..."
             echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin
-            docker pull "$IMG"
 
-            echo "$IMG" > .ci_project_image
-            echo "nexus" > .ci_image_source
-            echo "[resolver] Pulled from Nexus => $IMG"
+            if docker pull "$NEXUS_IMG"; then
+              echo "$NEXUS_IMG" > .ci_project_image
+              echo "nexus" > .ci_image_source
+              echo "[resolver] Pulled from Nexus => $NEXUS_IMG"
+              exit 0
+            fi
+
+            # Step 3: si Nexus no lo tiene, bajar de internet (Docker Hub) y retaggear al nombre Nexus
+            echo "[resolver] Nexus doesn't have it. Pulling from Internet (Docker Hub)..."
+            docker pull "$INTERNET_IMG"
+
+            # Retag a nombre Nexus para que el resto del pipeline use el mismo nombre siempre
+            docker tag "$INTERNET_IMG" "$NEXUS_IMG"
+
+            echo "$NEXUS_IMG" > .ci_project_image
+            echo "internet" > .ci_image_source
+            echo "[resolver] Pulled from Internet and retagged => $NEXUS_IMG"
           '''
         }
       }
@@ -241,9 +263,7 @@ pipeline {
       }
     }
 
-    // ✅ NUEVO: Si la imagen se tomó de LOCAL, verifica si existe en Nexus.
-    // Si NO existe, la sube. Si existe, no hace nada.
-    // Si la imagen se tomó de NEXUS, NO hace nada.
+    // ✅ Si la imagen se tomó de LOCAL, verifica si existe en Nexus; si no existe, la sube.
     stage('Publish Base Image to Nexus (only if local & missing)') {
       when {
         expression {
@@ -259,7 +279,6 @@ pipeline {
             echo "[base-publish] IMAGE_SOURCE=local => checking in Nexus..."
             echo "[base-publish] PROJECT_IMAGE=$PROJECT_IMAGE"
 
-            # Construir URL del manifest en Nexus: /v2/<repo>/manifests/<tag>
             REPO_PATH="${BASE_IMAGE_REPO}"
             TAG="${BASE_IMAGE_TAG}"
             MANIFEST_URL="http://${PULL_REGISTRY}/v2/${REPO_PATH}/manifests/${TAG}"
@@ -286,6 +305,31 @@ pipeline {
 
             echo "[base-publish] Unexpected HTTP code from Nexus: $CODE"
             echo "[base-publish] For safety, not pushing."
+          '''
+        }
+      }
+    }
+
+    // ✅ Si la imagen se tomó de INTERNET, después del deploy se sube DIRECTO a Nexus (sin consultar).
+    stage('Publish Base Image to Nexus (direct if internet)') {
+      when {
+        expression {
+          return fileExists('.ci_image_source') && readFile('.ci_image_source').trim() == 'internet'
+        }
+      }
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+          sh '''
+            set -e
+            PROJECT_IMAGE="$(cat .ci_project_image)"
+
+            echo "[base-publish] IMAGE_SOURCE=internet => pushing directly to Nexus..."
+            echo "[base-publish] PROJECT_IMAGE=$PROJECT_IMAGE"
+
+            echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin
+            docker push "$PROJECT_IMAGE"
+
+            echo "[base-publish] Pushed base image (internet) => $PROJECT_IMAGE"
           '''
         }
       }
