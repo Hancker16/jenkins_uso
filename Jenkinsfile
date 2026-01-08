@@ -9,7 +9,7 @@ pipeline {
   parameters {
     string(
       name: 'BASE_IMAGE_TAG',
-      defaultValue: '20-bookworm',
+      defaultValue: '20-prueba-hander',
       description: 'Tag de la imagen base (ej: 20-bookworm, 20-alpine, 22-bookworm)'
     )
   }
