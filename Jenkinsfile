@@ -20,9 +20,10 @@ pipeline {
   stages {
     stage('Checkout') {
       steps {
-        deleteDir()
-        checkout scm
-        sh 'ls -la'
+deleteDir()
+checkout scm
+sh 'rm -rf .scannerwork || true'
+
       }
     }
 
@@ -61,51 +62,78 @@ pipeline {
       }
     }
 
-    stage('Quality Gate Result') {
-      environment {
-        SONAR_TOKEN = credentials('sonar-token')
-      }
-      steps {
-        sh '''
-          set +e
+ stage('Quality Gate Result (no bloquea)') {
+  environment {
+    SONAR_TOKEN = credentials('sonar-token')
+  }
+  steps {
+    sh '''
+      set -e
 
-          # Lee el task url del scanner
-          REPORT=".scannerwork/report-task.txt"
-          CE_TASK_URL=$(grep -E '^ceTaskUrl=' "$REPORT" | cut -d= -f2-)
+      REPORT=".scannerwork/report-task.txt"
+      if [ ! -f "$REPORT" ]; then
+        echo "No existe $REPORT => marcando qg-f"
+        echo "qg-f" > .qg_tag
+        exit 0
+      fi
 
-          # Espera a que Sonar termine el procesamiento
-          ANALYSIS_ID=""
-          for i in $(seq 1 90); do
-            JSON=$(curl -s -u "$SONAR_TOKEN:" "$CE_TASK_URL")
-            STATUS=$(echo "$JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
+      echo "==== report-task.txt ===="
+      cat "$REPORT"
+      echo "========================="
 
-            if [ "$STATUS" = "SUCCESS" ]; then
-              ANALYSIS_ID=$(echo "$JSON" | sed -n 's/.*"analysisId":"\\([^"]*\\)".*/\\1/p' | head -n1)
-              break
-            fi
-            sleep 2
-          done
+      CE_TASK_URL=$(grep -E '^ceTaskUrl=' "$REPORT" | cut -d= -f2-)
+      CE_TASK_ID=$(grep -E '^ceTaskId=' "$REPORT" | cut -d= -f2-)
+      SERVER_URL=$(grep -E '^serverUrl=' "$REPORT" | cut -d= -f2-)
 
-          if [ -z "$ANALYSIS_ID" ]; then
-            echo "qg-f" > .qg_tag
-            echo "No se pudo obtener analysisId => marcando como qg-f"
-            exit 0
-          fi
+      echo "serverUrl=$SERVER_URL"
+      echo "ceTaskId=$CE_TASK_ID"
+      echo "ceTaskUrl=$CE_TASK_URL"
 
-          # Consulta el QG
-          QG_JSON=$(curl -s -u "$SONAR_TOKEN:" "http://sonarqube:9000/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
-          QG_STATUS=$(echo "$QG_JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
+      ANALYSIS_ID=""
 
-          echo "Quality Gate status: $QG_STATUS"
+      # esperar el procesamiento EXACTO de ese ceTaskUrl
+      for i in $(seq 1 120); do
+        JSON=$(curl -s -u "$SONAR_TOKEN:" "$CE_TASK_URL")
+        STATUS=$(echo "$JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
 
-          if [ "$QG_STATUS" = "OK" ]; then
-            echo "qg-p" > .qg_tag
-          else
-            echo "qg-f" > .qg_tag
-          fi
-        '''
-      }
-    }
+        if [ "$STATUS" = "SUCCESS" ]; then
+          ANALYSIS_ID=$(echo "$JSON" | sed -n 's/.*"analysisId":"\\([^"]*\\)".*/\\1/p' | head -n1)
+          break
+        fi
+
+        if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
+          echo "CE task falló status=$STATUS => qg-f"
+          echo "qg-f" > .qg_tag
+          exit 0
+        fi
+
+        sleep 2
+      done
+
+      if [ -z "$ANALYSIS_ID" ]; then
+        echo "Timeout esperando analysisId => qg-f"
+        echo "qg-f" > .qg_tag
+        exit 0
+      fi
+
+      echo "analysisId=$ANALYSIS_ID"
+
+      # consultar el QG del MISMO analysisId
+      QG_JSON=$(curl -s -u "$SONAR_TOKEN:" "http://sonarqube:9000/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+      QG_STATUS=$(echo "$QG_JSON" | sed -n 's/.*"status":"\\([^"]*\\)".*/\\1/p' | head -n1)
+
+      echo "QG_JSON=$QG_JSON"
+      echo "Quality Gate status: $QG_STATUS"
+
+      if [ "$QG_STATUS" = "OK" ]; then
+        echo "qg-p" > .qg_tag
+      else
+        echo "qg-f" > .qg_tag
+      fi
+    '''
+  }
+}
+
 
     stage('Docker Build Image') {
       steps {
