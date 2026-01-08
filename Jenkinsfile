@@ -293,76 +293,77 @@ pipeline {
       }
     }
 
-    stage('Publish Base Image to Nexus (only if local & missing)') {
-      when {
-        expression {
-          return fileExists('.ci_image_source') && readFile('.ci_image_source').trim() == 'local'
-        }
-      }
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-          sh '''
-            set -e
-
-            info(){ echo "[INFO] $*"; }
-            ok(){ echo "[OK]   $*"; }
-            warn(){ echo "[WARN] $*"; }
-
-            PROJECT_IMAGE="$(cat .ci_project_image)"
-            info "Base image vino de LOCAL. Verificando si ya existe en Nexus..."
-            info "Base image => $PROJECT_IMAGE"
-
-            REPO_PATH="${BASE_IMAGE_REPO}"
-            TAG="${BASE_IMAGE_TAG}"
-            MANIFEST_URL="http://${PULL_REGISTRY}/v2/${REPO_PATH}/manifests/${TAG}"
-
-            CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
-              -u "${NEXUS_USER}:${NEXUS_PASS}" \
-              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-              "$MANIFEST_URL" || true)
-
-            if [ "$CODE" = "200" ]; then
-              ok "Ya existe en Nexus (HTTP 200). No se publica."
-              exit 0
-            fi
-
-            if [ "$CODE" = "404" ]; then
-              warn "No existe en Nexus (HTTP 404). Publicando base image ahora..."
-              echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin >/dev/null 2>&1 || true
-              docker push "$PROJECT_IMAGE" >/dev/null 2>&1 || docker push "$PROJECT_IMAGE"
-              ok "Base image publicada => $PROJECT_IMAGE"
-              exit 0
-            fi
-
-            warn "Código HTTP inesperado al consultar Nexus: $CODE. Por seguridad, no se publica."
-          '''
-        }
-      }
+stage('Publish Base Image to Nexus') {
+  when {
+    expression {
+      return fileExists('.ci_image_source')
     }
+  }
+  steps {
+    withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+      sh '''
+        set -e
 
-    stage('Publish Base Image to Nexus (direct if internet)') {
-      when {
-        expression {
-          return fileExists('.ci_image_source') && readFile('.ci_image_source').trim() == 'internet'
-        }
-      }
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-          sh '''
-            set -e
-            PROJECT_IMAGE="$(cat .ci_project_image)"
+        info(){ echo "[INFO] $*"; }
+        ok(){ echo "[OK]   $*"; }
+        warn(){ echo "[WARN] $*"; }
 
-            echo "[INFO] Base image vino de INTERNET. Publicando directamente en Nexus..."
-            echo "[INFO] Base image => $PROJECT_IMAGE"
+        SOURCE="$(cat .ci_image_source | tr -d '\\r' | xargs || true)"
+        PROJECT_IMAGE="$(cat .ci_project_image | tr -d '\\r' | xargs || true)"
 
-            echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin >/dev/null 2>&1 || true
+        if [ -z "$SOURCE" ] || [ -z "$PROJECT_IMAGE" ]; then
+          warn "Falta .ci_image_source o .ci_project_image. No se publica."
+          exit 0
+        fi
+
+        info "Base image source => $SOURCE"
+        info "Base image => $PROJECT_IMAGE"
+
+        # Login (best-effort)
+        echo "$NEXUS_PASS" | docker login "$PULL_REGISTRY" -u "$NEXUS_USER" --password-stdin >/dev/null 2>&1 || true
+
+        if [ "$SOURCE" = "internet" ]; then
+          info "Vino de INTERNET. Publicando directamente en Nexus..."
+          docker push "$PROJECT_IMAGE" >/dev/null 2>&1 || docker push "$PROJECT_IMAGE"
+          ok "Base image publicada (internet) => $PROJECT_IMAGE"
+          exit 0
+        fi
+
+        if [ "$SOURCE" = "local" ]; then
+          info "Vino de LOCAL. Verificando si ya existe en Nexus antes de publicar..."
+
+          REPO_PATH="${BASE_IMAGE_REPO}"
+          TAG="${BASE_IMAGE_TAG}"
+          MANIFEST_URL="http://${PULL_REGISTRY}/v2/${REPO_PATH}/manifests/${TAG}"
+
+          CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -u "${NEXUS_USER}:${NEXUS_PASS}" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "$MANIFEST_URL" || true)
+
+          if [ "$CODE" = "200" ]; then
+            ok "Ya existe en Nexus (HTTP 200). No se publica."
+            exit 0
+          fi
+
+          if [ "$CODE" = "404" ]; then
+            warn "No existe en Nexus (HTTP 404). Publicando base image ahora..."
             docker push "$PROJECT_IMAGE" >/dev/null 2>&1 || docker push "$PROJECT_IMAGE"
+            ok "Base image publicada => $PROJECT_IMAGE"
+            exit 0
+          fi
 
-            echo "[OK] Base image publicada (internet) => $PROJECT_IMAGE"
-          '''
-        }
-      }
+          warn "Código HTTP inesperado al consultar Nexus: $CODE. Por seguridad, no se publica."
+          exit 0
+        fi
+
+        warn "Valor desconocido en .ci_image_source='$SOURCE'. No se publica."
+        exit 0
+      '''
     }
+  }
+}
+
 
   }
 }
