@@ -15,36 +15,39 @@ pipeline {
   }
 
   environment {
-    APP_NAME   = "uso_jenkins"
-    APP_DIR    = "."
-    DOCKER_NET = "laboratio-ci_ci"
+    APP_NAME   = 'uso_jenkins'
+    APP_DIR    = '.'
+    DOCKER_NET = 'laboratio-ci_ci'
 
-    PULL_REGISTRY   = "host.docker.internal:8084"
-    BASE_IMAGE_REPO = "library/node"
+    PULL_REGISTRY   = 'host.docker.internal:8084'
+    BASE_IMAGE_REPO = 'library/node'
 
-    INTERNET_REGISTRY = "docker.io"
-    INTERNET_IMAGE    = "node"
+    INTERNET_REGISTRY = 'docker.io'
+    INTERNET_IMAGE    = 'node'
 
-    PUSH_REGISTRY = "host.docker.internal:8082"
+    PUSH_REGISTRY = 'host.docker.internal:8082'
     BASE_TAG = "${BUILD_NUMBER}"
   }
 
   stages {
-
     stage('Checkout') {
       steps {
-        echo "[INFO] Checkout del repositorio y limpieza de workspace..."
+        echo '[INFO] Checkout del repositorio y limpieza de workspace...'
         deleteDir()
         checkout scm
         sh 'rm -rf .scannerwork || true'
-        echo "[OK] Código listo."
+        echo '[OK] Código listo.'
       }
     }
 
     stage('Resolve Project Image (local / nexus / internet)') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-          sh '''
+        withCredentials(
+          [usernamePassword(
+            credentialsId: 'nexus-docker',
+            usernameVariable: 'NEXUS_USER',
+            passwordVariable: 'NEXUS_PASS')]) {
+              sh '''
             set -e
 
             log(){ echo "[INFO] $*"; }
@@ -97,7 +100,7 @@ pipeline {
             echo "internet" > .ci_image_source
             ok "Descargada de Internet y retaggeada como Nexus => $NEXUS_IMG"
           '''
-        }
+            }
       }
     }
 
@@ -130,7 +133,7 @@ pipeline {
                       npm config set audit false >/dev/null 2>&1 || true; \
                       npm config set loglevel warn >/dev/null 2>&1 || true; \
                       npm install --silent; \
-                      npm run build" 
+                      npm run build"
           echo "[OK] Build npm completado."
         '''
       }
@@ -159,7 +162,7 @@ pipeline {
                         -Dsonar.projectKey=uso_jenkins \
                         -Dsonar.sources=. \
                         -Dsonar.host.url=http://sonarqube:9000 \
-                        -Dsonar.login=$SONAR_TOKEN" 
+                        -Dsonar.login=$SONAR_TOKEN"
 
           echo "[OK] Scan enviado a SonarQube."
         '''
@@ -255,7 +258,12 @@ pipeline {
 
     stage('Push to Nexus (app image)') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+        withCredentials(
+          [
+            usernamePassword(
+              credentialsId: 'nexus-docker',
+              usernameVariable: 'NEXUS_USER',
+              passwordVariable: 'NEXUS_PASS')]) {
           sh '''
             set -e
             IMAGE=$(cat .image_name)
@@ -268,7 +276,7 @@ pipeline {
 
             echo "[OK] Imagen subida a Nexus => $IMAGE"
           '''
-        }
+              }
       }
     }
 
@@ -293,15 +301,15 @@ pipeline {
       }
     }
 
-stage('Publish Base Image to Nexus') {
-  when {
-    expression {
-      return fileExists('.ci_image_source')
-    }
-  }
-  steps {
-    withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-      sh '''
+    stage('Publish Base Image to Nexus') {
+      when {
+        expression {
+          return fileExists('.ci_image_source')
+        }
+      }
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'nexus-docker', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+          sh '''
         set -e
 
         info(){ echo "[INFO] $*"; }
@@ -360,10 +368,8 @@ stage('Publish Base Image to Nexus') {
         warn "Valor desconocido en .ci_image_source='$SOURCE'. No se publica."
         exit 0
       '''
+        }
+      }
     }
-  }
-}
-
-
   }
 }
