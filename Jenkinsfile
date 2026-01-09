@@ -139,35 +139,37 @@ pipeline {
       }
     }
 
-    stage('SonarQube Scan') {
-      environment {
-        SONAR_TOKEN = credentials('sonar-token')
-      }
-      steps {
-        sh '''
-          set -e
-          echo "[INFO] Ejecutando análisis SonarQube..."
-          PROJECT_IMAGE="$(cat .ci_project_image)"
-          JENKINS_CID="$(hostname)"
+stage('SonarQube Scan') {
+  environment {
+    SONAR_TOKEN = credentials('sonar-token')
+  }
+  steps {
+    sh '''
+      set -e
+      echo "[INFO] Build Maven (necesario para target/classes)..."
+      chmod +x mvnw || true
+      ./mvnw -B -DskipTests clean package
 
-          # Silenciamos apt y dejamos sonar con output moderado
-          docker run --rm \
-            --network "$DOCKER_NET" \
-            --volumes-from "$JENKINS_CID" \
-            -w /var/jenkins_home/jobs/ci-cd-demo/workspace \
-            "$PROJECT_IMAGE" \
-            bash -lc "apt-get update -qq >/dev/null; \
-                      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-17-jre >/dev/null; \
-                      npx --yes sonar-scanner \
-                        -Dsonar.projectKey=uso_jenkins \
-                        -Dsonar.sources=. \
-                        -Dsonar.host.url=http://sonarqube:9000 \
-                        -Dsonar.login=$SONAR_TOKEN"
+      echo "[INFO] Ejecutando análisis SonarQube (sonar-scanner en Docker)..."
+      JENKINS_CID="$(hostname)"
 
-          echo "[OK] Scan enviado a SonarQube."
-        '''
-      }
-    }
+      docker run --rm \
+        --network "$DOCKER_NET" \
+        --volumes-from "$JENKINS_CID" \
+        -w /var/jenkins_home/jobs/firma_digital/workspace \
+        sonarsource/sonar-scanner-cli:latest \
+        sonar-scanner -X \
+          -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
+          -Dsonar.sources=src \
+          -Dsonar.java.binaries=target/classes \
+          -Dsonar.host.url="http://sonarqube:9000" \
+          -Dsonar.login="$SONAR_TOKEN"
+
+      echo "[OK] Scan enviado a SonarQube."
+    '''
+  }
+}
+
 
     stage('Quality Gate Result') {
       environment {
